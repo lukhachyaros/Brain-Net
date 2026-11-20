@@ -1,6 +1,14 @@
 # project-brain
 
+<p align="center">
+  <img src="docs/images/hero-banner.jpg" alt="Project Brain Banner" width="100%">
+</p>
+
 Persistent graph memory for AI coding agents. Keeps a summarized knowledge graph in `.brain/` so agents don't re-read the entire codebase each session.
+
+<p align="center">
+  <img src="docs/images/concept-diagram.jpg" alt="Concept Diagram" width="85%">
+</p>
 
 ## Quick Start
 
@@ -10,6 +18,12 @@ python path/to/project-brain/scripts/brain.py init
 python path/to/project-brain/scripts/brain.py scan
 python path/to/project-brain/scripts/brain.py digest
 ```
+
+## Workflow Pipeline
+
+<p align="center">
+  <img src="docs/images/workflow-pipeline.jpg" alt="Workflow Pipeline" width="90%">
+</p>
 
 ## Install Location by Tool
 
@@ -40,6 +54,19 @@ python path/to/project-brain/scripts/brain.py digest
 
 All commands support `--json` for machine-readable output.
 
+## Visual Graph Viewer
+
+<p align="center">
+  <img src="docs/images/viewer-overview.png" alt="Graph Viewer" width="90%">
+</p>
+
+```bash
+python path/to/project-brain/scripts/brain.py serve --port 8765
+# Open http://127.0.0.1:8765
+```
+
+Interactive force-directed graph with search, filtering, timeline, and live updates.
+
 ## Data Files
 
 Stored in `.brain/` at project root:
@@ -54,11 +81,3 @@ Stored in `.brain/` at project root:
 - Python 3.10+ (stdlib only, no pip install)
 - Works on Windows 11, macOS, Linux
 
-## Viewer
-
-```bash
-python path/to/project-brain/scripts/brain.py serve --port 8765
-# Open http://127.0.0.1:8765
-```
-
-Interactive force-directed graph with search, filtering, timeline, and live updates.
