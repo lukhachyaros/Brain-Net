@@ -55,6 +55,7 @@ else:
 # ============================================================================
 
 VERSION = "1.0.0"
+SCHEMA_VERSION = 1
 DEFAULT_PORT = 8765
 DEFAULT_LOCK_TIMEOUT = 10.0
 DEFAULT_STALE_LOCK_AGE = 60.0
@@ -62,6 +63,7 @@ DEFAULT_MAX_TOKENS = 2000
 MAX_INDEX_CHARACTERS = 8000
 MAX_SUMMARY_LENGTH = 280
 BINARY_CHECK_BYTES = 8192
+COMPACT_THRESHOLD = 5000
 
 # Node Type Enumeration
 VALID_NODE_TYPES: Set[str] = {
@@ -152,6 +154,39 @@ class BrainConfigError(BrainError):
 def iso_now() -> str:
     """Return the current UTC timestamp formatted as ISO 8601 string."""
     return datetime.datetime.now(timezone.utc).isoformat()
+
+
+def is_pid_alive(pid: int) -> bool:
+    """Return whether a process PID appears to be alive on the current OS."""
+    if pid <= 0:
+        return False
+    if pid == os.getpid():
+        return True
+    try:
+        if sys.platform == "win32":
+            import ctypes
+
+            process = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
+            if process:
+                ctypes.windll.kernel32.CloseHandle(process)
+                return True
+            return False
+        os.kill(pid, 0)
+        return True
+    except (OSError, AttributeError):
+        return False
+
+
+def lock_owner_is_dead(lock_path: Path) -> bool:
+    """Best-effort check for a lock file whose recorded process is gone."""
+    try:
+        text = lock_path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    match = re.search(r"^pid=(\d+)$", text, re.MULTILINE)
+    if not match:
+        return False
+    return not is_pid_alive(int(match.group(1)))
 
 
 def generate_session_id() -> str:
@@ -279,6 +314,7 @@ class BrainConfig:
             "ignore_globs": self.ignore_globs,
             "max_tokens": self.max_tokens,
             "languages": self.languages,
+            "schema_version": SCHEMA_VERSION,
         }
         if self.description:
             data["description"] = self.description
@@ -286,6 +322,12 @@ class BrainConfig:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> BrainConfig:
+        schema_version = int(data.get("schema_version", 1))
+        if schema_version > SCHEMA_VERSION:
+            raise BrainConfigError(
+                f"Unsupported config schema version {schema_version}; "
+                f"this Brain-Net supports up to {SCHEMA_VERSION}. Upgrade Brain-Net."
+            )
         return cls(
             ignore_globs=list(data.get("ignore_globs", DEFAULT_IGNORE_GLOBS)),
             max_tokens=int(data.get("max_tokens", DEFAULT_MAX_TOKENS)),
@@ -340,6 +382,7 @@ class Node:
             "id": self.id,
             "needs_summary": bool(self.needs_summary),
             "path": self.path,
+            "schema_version": SCHEMA_VERSION,
             "session_id": self.session_id,
             "sha1": self.sha1,
             "status": self.status,
@@ -353,6 +396,12 @@ class Node:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> Node:
         """Instantiate a Node from raw dictionary."""
+        schema_version = int(data.get("schema_version", 1))
+        if schema_version > SCHEMA_VERSION:
+            raise BrainValidationError(
+                f"Unsupported node schema version {schema_version}; "
+                f"this Brain-Net supports up to {SCHEMA_VERSION}. Upgrade Brain-Net."
+            )
         return cls(
             id=str(data.get("id", "")),
             type=str(data.get("type", "concept")),
@@ -413,6 +462,7 @@ class Edge:
             "created": self.created,
             "dst": self.dst,
             "note": self.note,
+            "schema_version": SCHEMA_VERSION,
             "src": self.src,
             "type": self.type,
             "weight": round(self.weight, 4),
@@ -424,6 +474,12 @@ class Edge:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> Edge:
         """Instantiate an Edge from raw dictionary."""
+        schema_version = int(data.get("schema_version", 1))
+        if schema_version > SCHEMA_VERSION:
+            raise BrainValidationError(
+                f"Unsupported edge schema version {schema_version}; "
+                f"this Brain-Net supports up to {SCHEMA_VERSION}. Upgrade Brain-Net."
+            )
         return cls(
             src=str(data.get("src", "")),
             dst=str(data.get("dst", "")),
@@ -444,7 +500,7 @@ class FileLock:
     Cross-platform file locking context manager with timeout and stale lock detection.
     - Unix: Uses fcntl.flock(fd, LOCK_EX | LOCK_NB)
     - Windows: Uses msvcrt.locking(fd, LK_NBLCK, 1)
-    - Stale detection: Warns and overrides locks older than stale_age seconds.
+    - Lock-file age is diagnostic only; OS advisory locks remain authoritative.
     """
 
     def __init__(
@@ -467,7 +523,9 @@ class FileLock:
         self.lock_path.parent.mkdir(parents=True, exist_ok=True)
 
         while True:
-            # Check for stale lock file
+            # Detect orphaned lock metadata for diagnostics, but never unlink it.
+            # Unlinking a live lock file can make concurrent processes lock
+            # different inodes and bypass the critical section.
             if self.lock_path.exists():
                 try:
                     stat_info = self.lock_path.stat()
@@ -475,13 +533,10 @@ class FileLock:
                     if age > self.stale_age and not warned_stale:
                         sys.stderr.write(
                             f"[brain warning] Stale lock detected at {self.lock_path} "
-                            f"(age: {age:.1f}s > {self.stale_age:.1f}s). Overriding stale lock.\n"
+                            f"(age: {age:.1f}s > {self.stale_age:.1f}s). "
+                            "Waiting for the OS lock; the lock file will not be removed.\n"
                         )
                         warned_stale = True
-                        try:
-                            self.lock_path.unlink()
-                        except OSError:
-                            pass
                 except OSError:
                     pass
 
@@ -529,7 +584,11 @@ class FileLock:
                 time.sleep(0.05)
 
     def release(self) -> None:
-        """Release the file lock and remove the lock file."""
+        """Release the OS advisory lock while retaining lock metadata.
+
+        Retaining the file prevents a waiter that opened the old inode from
+        losing synchronization when another process creates a new lock file.
+        """
         if not self._is_locked:
             return
 
@@ -549,11 +608,6 @@ class FileLock:
                 except OSError:
                     pass
 
-            try:
-                if self.lock_path.exists():
-                    self.lock_path.unlink()
-            except OSError:
-                pass
         finally:
             self._file_obj = None
             self._fd = None
@@ -714,6 +768,14 @@ class BrainStorage:
                     f.write(line + "\n")
                 f.flush()
                 os.fsync(f.fileno())
+        if self.nodes_path.exists():
+            try:
+                with open(self.nodes_path, "r", encoding="utf-8") as f:
+                    line_count = sum(1 for line in f if line.strip())
+                if line_count > COMPACT_THRESHOLD:
+                    self.compact()
+            except OSError as err:
+                raise BrainStorageError(f"Could not inspect {self.nodes_path}: {err}") from err
 
     def append_edge(self, edge: Edge) -> None:
         """Append a single edge record to edges.jsonl under lock."""
@@ -731,6 +793,14 @@ class BrainStorage:
                     f.write(line + "\n")
                 f.flush()
                 os.fsync(f.fileno())
+        if self.edges_path.exists():
+            try:
+                with open(self.edges_path, "r", encoding="utf-8") as f:
+                    line_count = sum(1 for line in f if line.strip())
+                if line_count > COMPACT_THRESHOLD:
+                    self.compact()
+            except OSError as err:
+                raise BrainStorageError(f"Could not inspect {self.edges_path}: {err}") from err
 
     def compact(self) -> Dict[str, int]:
         """
@@ -753,8 +823,11 @@ class BrainStorage:
                                 try:
                                     n = Node.from_dict(json.loads(line))
                                     node_map[n.id] = n
-                                except Exception:
-                                    pass
+                                except Exception as err:
+                                    sys.stderr.write(
+                                        f"[brain warning] Compact skipped invalid node at line "
+                                        f"{nodes_before} in {self.nodes_path}: {err}\n"
+                                    )
 
                 sorted_nodes = sorted(node_map.values(), key=lambda n: n.id)
                 atomic_write_jsonl(self.nodes_path, [n.to_dict() for n in sorted_nodes])
@@ -773,8 +846,11 @@ class BrainStorage:
                                         edge_map.pop(e.key, None)
                                     else:
                                         edge_map[e.key] = e
-                                except Exception:
-                                    pass
+                                except Exception as err:
+                                    sys.stderr.write(
+                                        f"[brain warning] Compact skipped invalid edge at line "
+                                        f"{edges_before} in {self.edges_path}: {err}\n"
+                                    )
 
                 sorted_edges = sorted(edge_map.values(), key=lambda e: (e.src, e.dst, e.type))
                 atomic_write_jsonl(self.edges_path, [e.to_dict() for e in sorted_edges])
@@ -819,25 +895,38 @@ class GitIgnoreRule:
         anchored = pattern.startswith("/")
         if anchored:
             pattern = pattern[1:]
-
-        parts = pattern.split("**")
+        i = 0
         regex_parts: List[str] = []
+        while i < len(pattern):
+            char = pattern[i]
+            if char == "*":
+                if i + 1 < len(pattern) and pattern[i + 1] == "*":
+                    i += 2
+                    if i < len(pattern) and pattern[i] == "/":
+                        regex_parts.append("(?:[^/]+/)*")
+                        i += 1
+                    else:
+                        regex_parts.append(".*")
+                    continue
+                regex_parts.append("[^/]*")
+            elif char == "?":
+                regex_parts.append("[^/]")
+            elif char == "[":
+                end = pattern.find("]", i + 1)
+                if end != -1:
+                    regex_parts.append(pattern[i:end + 1])
+                    i = end
+                else:
+                    regex_parts.append(r"\[")
+            else:
+                regex_parts.append(re.escape(char))
+            i += 1
 
-        for i, part in enumerate(parts):
-            subparts = part.split("*")
-            escaped_subparts: List[str] = []
-            for j, subpart in enumerate(subparts):
-                escaped = re.escape(subpart).replace(r"\?", "[^/]")
-                escaped_subparts.append(escaped)
-            regex_parts.append("[^/]*".join(escaped_subparts))
-
-        full_regex = ".*".join(regex_parts)
-
+        full_regex = "".join(regex_parts)
         if anchored or "/" in pattern:
             final_regex = f"^{full_regex}(?:/.*)?$"
         else:
             final_regex = f"(?:^|/){full_regex}(?:/.*)?$"
-
         return re.compile(final_regex, re.IGNORECASE)
 
     def matches(self, rel_path: str, is_dir: bool = False) -> bool:
@@ -878,8 +967,8 @@ class GitIgnoreMatcher:
                     if not line or line.startswith("#"):
                         continue
                     self.add_pattern(line)
-        except OSError:
-            pass
+        except OSError as err:
+            raise BrainStorageError(f"Could not read {gi_path}: {err}") from err
 
     def add_pattern(self, pattern: str) -> None:
         """Add an ignore pattern."""
@@ -1249,6 +1338,11 @@ class GraphQueryEngine:
             summary_lower = node.summary.lower()
             tags_lower = [t.lower() for t in node.tags]
 
+            if len(tokens) > 1 and raw_query.lower() in title_lower:
+                score += 18.0
+            if len(tokens) > 1 and raw_query.lower() in summary_lower:
+                score += 12.0
+
             for tok in tokens:
                 if tok in title_lower:
                     score += 10.0
@@ -1330,6 +1424,32 @@ def calculate_central_nodes(
     ]
     active_items.sort(key=lambda item: (item[1], item[0].updated), reverse=True)
     return active_items[:top_n]
+
+
+def generate_file_summary(file_path: Path) -> str:
+    """Generate a short source summary from a module docstring or leading comment."""
+    try:
+        text = file_path.read_text(encoding="utf-8", errors="ignore")
+    except OSError as err:
+        raise BrainStorageError(f"Could not read source file {file_path}: {err}") from err
+
+    if file_path.suffix.lower() == ".py":
+        try:
+            docstring = ast.get_docstring(ast.parse(text, filename=str(file_path)), clean=True)
+            if docstring:
+                return " ".join(docstring.split())[:MAX_SUMMARY_LENGTH]
+        except (SyntaxError, ValueError):
+            pass
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith(("<!--", "/*", "/**", "*", "//", "#")):
+            line = re.sub(r"^(<!--|/\*\*?|//+|#+|\*)\s*", "", line).strip()
+        if line and not line.startswith(("import ", "from ", "use ", "require(")):
+            return line[:MAX_SUMMARY_LENGTH]
+    return ""
 
 
 def infer_project_description(project_root: Path) -> str:
@@ -1560,8 +1680,13 @@ class BrainViewerHandler(http.server.BaseHTTPRequestHandler):
         pass
 
     def send_cors_headers(self) -> None:
-        """Set standard CORS headers permitting local browser interaction."""
-        self.send_header("Access-Control-Allow-Origin", "*")
+        """Allow browser access only from loopback origins."""
+        origin = self.headers.get("Origin")
+        if origin:
+            parsed_origin = urllib.parse.urlparse(origin)
+            if parsed_origin.hostname in ("127.0.0.1", "localhost", "::1"):
+                self.send_header("Access-Control-Allow-Origin", origin)
+                self.send_header("Vary", "Origin")
         self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
@@ -1615,6 +1740,20 @@ class BrainViewerHandler(http.server.BaseHTTPRequestHandler):
         edges_list = self.storage.read_edges()
 
         since = query.get("since", [None])[0]
+        node_id = query.get("node_id", [None])[0]
+        try:
+            depth = max(0, int(query.get("depth", ["0"])[0]))
+        except (TypeError, ValueError):
+            depth = 0
+        try:
+            offset = max(0, int(query.get("offset", ["0"])[0]))
+        except (TypeError, ValueError):
+            offset = 0
+        try:
+            limit = min(1000, max(1, int(query.get("limit", ["100"])[0])))
+        except (TypeError, ValueError):
+            limit = 100
+
         if since:
             filtered_nodes = [
                 n.to_dict()
@@ -1630,11 +1769,42 @@ class BrainViewerHandler(http.server.BaseHTTPRequestHandler):
             filtered_nodes = [n.to_dict() for n in nodes_dict.values()]
             filtered_edges = [e.to_dict() for e in edges_list]
 
+        if node_id:
+            allowed_ids = {node_id} if node_id in nodes_dict else set()
+            frontier = set(allowed_ids)
+            for _ in range(depth):
+                neighbors: Set[str] = set()
+                for edge in edges_list:
+                    if edge.src in frontier:
+                        neighbors.add(edge.dst)
+                    if edge.dst in frontier:
+                        neighbors.add(edge.src)
+                next_ids = frontier | neighbors
+                if next_ids == frontier:
+                    break
+                frontier = next_ids
+                allowed_ids = next_ids
+            filtered_nodes = [n for n in filtered_nodes if n["id"] in allowed_ids]
+            filtered_edges = [
+                e for e in filtered_edges if e["src"] in allowed_ids and e["dst"] in allowed_ids
+            ]
+
+        filtered_nodes.sort(key=lambda item: item["id"])
+        total = len(filtered_nodes)
+        filtered_nodes = filtered_nodes[offset:offset + limit]
+        visible_ids = {n["id"] for n in filtered_nodes}
+        filtered_edges = [
+            e for e in filtered_edges if e["src"] in visible_ids and e["dst"] in visible_ids
+        ]
+
         payload = {
             "edges": filtered_edges,
             "nodes": filtered_nodes,
+            "limit": limit,
+            "offset": offset,
             "session_id": GLOBAL_SESSION_ID,
             "timestamp": iso_now(),
+            "total": total,
         }
 
         data = json.dumps(payload, sort_keys=True).encode("utf-8")
@@ -1686,16 +1856,21 @@ def cmd_init(args: argparse.Namespace) -> int:
     """
     root = find_project_root(args.root)
     storage = BrainStorage(root)
-    storage.ensure_brain_dir()
+    dry_run = bool(getattr(args, "dry_run", False))
+    no_injection = bool(getattr(args, "no_instruction_injection", False))
+    agent = getattr(args, "agent", "all")
+
+    if not dry_run:
+        storage.ensure_brain_dir()
 
     # 1. Config initialization
-    if not storage.config_path.exists():
+    if not dry_run and not storage.config_path.exists():
         storage.save_config(BrainConfig())
 
     # 2. Touch data files if not present
-    if not storage.nodes_path.exists():
+    if not dry_run and not storage.nodes_path.exists():
         atomic_write_text(storage.nodes_path, "")
-    if not storage.edges_path.exists():
+    if not dry_run and not storage.edges_path.exists():
         atomic_write_text(storage.edges_path, "")
 
     # 3. Locate agent instruction block
@@ -1707,8 +1882,8 @@ def cmd_init(args: argparse.Namespace) -> int:
         try:
             with open(agent_block_path, "r", encoding="utf-8") as f:
                 block_template = f.read()
-        except OSError:
-            pass
+        except OSError as err:
+            raise BrainStorageError(f"Could not read agent block {agent_block_path}: {err}") from err
 
     # Compute relative path from project root to brain.py
     brain_script = Path(__file__).resolve()
@@ -1720,11 +1895,17 @@ def cmd_init(args: argparse.Namespace) -> int:
     injected_block = block_template.replace("{{BRAIN_PATH}}", rel_brain).strip()
 
     # 4. Inject block into target agent guideline files
-    target_rel_files = [
-        "AGENTS.md",
-        "GEMINI.md",
-        PurePosixPath(".github/copilot-instructions.md").as_posix(),
+    all_targets = [
+        ("codex", "AGENTS.md"),
+        ("gemini", "GEMINI.md"),
+        ("copilot", PurePosixPath(".github/copilot-instructions.md").as_posix()),
     ]
+    if no_injection:
+        target_rel_files: List[str] = []
+    elif agent == "all":
+        target_rel_files = [rel for _, rel in all_targets]
+    else:
+        target_rel_files = [rel for agent_name, rel in all_targets if agent_name == agent]
     injected_files: List[str] = []
 
     marker_regex = re.compile(
@@ -1739,8 +1920,8 @@ def cmd_init(args: argparse.Namespace) -> int:
             try:
                 with open(target_path, "r", encoding="utf-8") as f:
                     content = f.read()
-            except OSError:
-                content = ""
+            except OSError as err:
+                raise BrainStorageError(f"Could not read instruction file {target_path}: {err}") from err
 
         if marker_regex.search(content):
             new_content = marker_regex.sub(injected_block, content)
@@ -1750,8 +1931,9 @@ def cmd_init(args: argparse.Namespace) -> int:
             else:
                 new_content = injected_block + "\n"
 
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write_text(target_path, new_content)
+        if not dry_run:
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            atomic_write_text(target_path, new_content)
         injected_files.append(target_rel)
 
     # 5. Update .gitignore with .brain/*.lock
@@ -1764,21 +1946,25 @@ def cmd_init(args: argparse.Namespace) -> int:
             with open(gi_path, "r", encoding="utf-8") as f:
                 gi_content = f.read()
             if lock_entry not in gi_content and "*.lock" not in gi_content:
-                with open(gi_path, "a", encoding="utf-8") as f:
-                    f.write(f"\n{lock_entry}\n")
+                if not dry_run:
+                    with open(gi_path, "a", encoding="utf-8") as f:
+                        f.write(f"\n{lock_entry}\n")
                 gi_updated = True
-        except OSError:
-            pass
+        except OSError as err:
+            raise BrainStorageError(f"Could not read {gi_path}: {err}") from err
     else:
-        try:
-            with open(gi_path, "w", encoding="utf-8") as f:
-                f.write(f"{lock_entry}\n")
+        if not dry_run:
+            try:
+                with open(gi_path, "w", encoding="utf-8") as f:
+                    f.write(f"{lock_entry}\n")
+            except OSError as err:
+                raise BrainStorageError(f"Could not write {gi_path}: {err}") from err
+        else:
             gi_updated = True
-        except OSError:
-            pass
 
     res = {
         "brain_dir": storage.brain_dir.as_posix(),
+        "dry_run": dry_run,
         "gitignore_updated": gi_updated,
         "injected_files": injected_files,
         "project_root": root.as_posix(),
@@ -1788,7 +1974,8 @@ def cmd_init(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(res, indent=2))
     else:
-        print(f"Project Brain initialized at: {root}")
+        prefix = "Project Brain init dry-run" if dry_run else "Project Brain initialized"
+        print(f"{prefix} at: {root}")
         print(f"Data directory: {storage.brain_dir}")
         print(f"Injected instructions into: {', '.join(injected_files)}")
         if gi_updated:
@@ -1886,19 +2073,30 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                     "message": f"Could not read {rel_f}: {err}",
                 })
 
-    # Check 5: Stale lock files (> 60s)
+    # Check 5: Stale lock metadata belongs only to a dead process
     now = time.time()
     for lock_path in (storage.nodes_lock_path, storage.edges_lock_path):
         if lock_path.exists():
             try:
                 age = now - lock_path.stat().st_mtime
-                if age > DEFAULT_STALE_LOCK_AGE:
+                if lock_owner_is_dead(lock_path):
                     issues.append({
                         "check": "stale_lock",
-                        "message": f"Stale lock file detected: {lock_path} ({age:.1f}s old).",
+                        "message": f"Stale lock file detected: {lock_path} (recorded process is dead).",
                     })
-            except OSError:
-                pass
+                elif not lock_owner_is_dead(lock_path) and age > DEFAULT_STALE_LOCK_AGE:
+                    # Legacy lock files without a PID are stale only after 60 seconds.
+                    text = lock_path.read_text(encoding="utf-8")
+                    if not re.search(r"^pid=(\d+)$", text, re.MULTILINE):
+                        issues.append({
+                            "check": "stale_lock",
+                            "message": f"Stale lock file detected: {lock_path} ({age:.1f}s old).",
+                        })
+            except OSError as err:
+                issues.append({
+                    "check": "lock_read_error",
+                    "message": f"Could not inspect lock file {lock_path}: {err}",
+                })
 
     # Check 6: JSONL integrity check
     for j_path in (storage.nodes_path, storage.edges_path):
@@ -1979,14 +2177,16 @@ def cmd_scan(args: argparse.Namespace) -> int:
 
         existing = existing_nodes.get(node_id)
         if existing is None:
+            generated_summary = generate_file_summary(file_path)
             node = Node(
                 id=node_id,
                 type="file",
                 title=file_path.name,
                 path=rel_path,
                 sha1=current_sha1,
+                summary=generated_summary,
                 status="active",
-                needs_summary=True,
+                needs_summary=not bool(generated_summary),
                 created=now_str,
                 updated=now_str,
                 session_id=GLOBAL_SESSION_ID,
@@ -1997,7 +2197,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
                 id=existing.id,
                 type="file",
                 title=existing.title or file_path.name,
-                summary=existing.summary,
+                summary=existing.summary or generate_file_summary(file_path),
                 path=rel_path,
                 sha1=current_sha1,
                 tags=existing.tags,
@@ -2605,21 +2805,34 @@ def cmd_lint(args: argparse.Namespace) -> int:
         except Exception:
             pass
 
-    # 5. Stale lock files
+    # 5. Stale lock metadata for dead owners
     now = time.time()
     for lp in (storage.nodes_lock_path, storage.edges_lock_path):
         if lp.exists():
             try:
                 age = now - lp.stat().st_mtime
-                if age > DEFAULT_STALE_LOCK_AGE:
+                if lock_owner_is_dead(lp):
                     issues.append({
                         "age_seconds": round(age, 1),
-                        "message": f"Stale lock file detected: {lp} ({age:.1f}s old).",
+                        "message": f"Stale lock file detected: {lp} (recorded process is dead).",
                         "path": str(lp),
                         "type": "stale_lock",
                     })
-            except OSError:
-                pass
+                else:
+                    text = lp.read_text(encoding="utf-8")
+                    if not re.search(r"^pid=(\d+)$", text, re.MULTILINE) and age > DEFAULT_STALE_LOCK_AGE:
+                        issues.append({
+                            "age_seconds": round(age, 1),
+                            "message": f"Stale lock file detected: {lp} ({age:.1f}s old).",
+                            "path": str(lp),
+                            "type": "stale_lock",
+                        })
+            except OSError as err:
+                issues.append({
+                    "message": f"Could not inspect lock file {lp}: {err}",
+                    "path": str(lp),
+                    "type": "lock_read_error",
+                })
 
     clean = len(issues) == 0
     res = {
@@ -2738,7 +2951,10 @@ def build_cli_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", title="commands", description="Available brain commands")
 
     # init
-    subparsers.add_parser("init", help="Initialize .brain/ and inject instructions into agent docs")
+    p_init = subparsers.add_parser("init", help="Initialize .brain/ and inject instructions into agent docs")
+    p_init.add_argument("--dry-run", action="store_true", help="Preview initialization without writing files")
+    p_init.add_argument("--no-instruction-injection", action="store_true", help="Initialize data without modifying agent instruction files")
+    p_init.add_argument("--agent", choices=["all", "codex", "gemini", "copilot"], default="all", help="Limit instruction injection to one agent")
 
     # doctor
     subparsers.add_parser("doctor", help="Verify environment health, paths, writability, and locks")

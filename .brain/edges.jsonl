@@ -1,19 +1,21 @@
-{"created": "2026-11-20T11:37:07.948753+00:00", "dst": "file:project-brain/scripts/test_brain.py", "note": "Windows file locks on temp directory cleanup", "src": "bug:20261120112604-windows-temporarydirectory-cleanup", "type": "caused_by", "weight": 1.0}
-{"created": "2026-11-20T11:26:03.842189+00:00", "dst": "file:project-brain/assets/viewer.html", "note": "", "src": "decision:20261120112603-canvas-over-svg-for", "type": "implements", "weight": 1.0}
-{"created": "2026-11-20T11:26:03.544573+00:00", "dst": "file:project-brain/scripts/brain.py", "note": "", "src": "decision:20261120112603-use-jsonl-appendonly-format", "type": "implements", "weight": 1.0}
-{"created": "2026-11-20T11:26:04.139844+00:00", "dst": "file:project-brain/scripts/brain.py", "note": "", "src": "decision:20261120112604-stdlib-only-zero-dependencies", "type": "implements", "weight": 1.0}
-{"created": "2026-11-20T11:37:07.188210+00:00", "dst": "file:project-brain/assets/agent-block.md", "note": "", "src": "file:.github/copilot-instructions.md", "type": "derived_from", "weight": 1.0}
-{"created": "2026-11-20T11:26:05.243478+00:00", "dst": "file:LICENSE", "note": "", "src": "file:.gitignore", "type": "relates_to", "weight": 1.0}
-{"created": "2026-11-20T11:37:06.466052+00:00", "dst": "file:project-brain/assets/agent-block.md", "note": "", "src": "file:AGENTS.md", "type": "derived_from", "weight": 1.0}
-{"created": "2026-11-20T11:37:06.824164+00:00", "dst": "file:project-brain/assets/agent-block.md", "note": "", "src": "file:GEMINI.md", "type": "derived_from", "weight": 1.0}
-{"created": "2026-11-20T11:26:05.550297+00:00", "dst": "file:project-brain/README.md", "note": "", "src": "file:LICENSE", "type": "relates_to", "weight": 1.0}
-{"created": "2026-11-20T11:36:30.064138+00:00", "dst": "file:project-brain/scripts/brain.py", "note": "", "src": "file:README.md", "type": "relates_to", "weight": 1.0}
-{"created": "2026-11-20T11:36:30.358677+00:00", "dst": "file:project-brain/SKILL.md", "note": "", "src": "file:project-brain/README.md", "type": "relates_to", "weight": 1.0}
-{"created": "2026-11-20T11:26:02.485110+00:00", "dst": "file:project-brain/scripts/brain.py", "note": "", "src": "file:project-brain/SKILL.md", "type": "depends_on", "weight": 1.0}
-{"created": "2026-11-20T11:26:03.203050+00:00", "dst": "file:project-brain/SKILL.md", "note": "", "src": "file:project-brain/assets/agent-block.md", "type": "derived_from", "weight": 1.0}
-{"created": "2026-11-20T11:26:02.182106+00:00", "dst": "file:project-brain/scripts/brain.py", "note": "", "src": "file:project-brain/assets/viewer.html", "type": "depends_on", "weight": 1.0}
-{"created": "2026-11-20T11:26:01.577025+00:00", "dst": "file:project-brain/scripts/test_brain.py", "note": "", "src": "file:project-brain/scripts/brain.py", "type": "tests", "weight": 1.0}
-{"created": "2026-11-20T11:26:01.209219+00:00", "dst": "file:project-brain/scripts/brain.py", "note": "", "src": "file:project-brain/scripts/test_brain.py", "type": "imports", "weight": 1.0}
-{"created": "2026-11-20T11:26:01.881821+00:00", "dst": "file:project-brain/scripts/brain.py", "note": "", "src": "file:project-brain/scripts/test_brain.py", "type": "tests", "weight": 1.0}
-{"created": "2026-11-20T11:37:07.523765+00:00", "dst": "file:project-brain/scripts/brain.py", "note": "Expand AST parsing support", "src": "task:20261120112604-add-more-language-parsers", "type": "relates_to", "weight": 1.0}
-{"created": "2026-11-20T11:26:04.430055+00:00", "dst": "file:project-brain/SKILL.md", "note": "", "src": "thought:20261120112604-agent-memory-persistence", "type": "relates_to", "weight": 1.0}
+{"created": "2026-11-20T11:37:07.948753+00:00", "dst": "file:project-brain/scripts/test_brain.py", "note": "Windows file locks on temp directory cleanup", "schema_version": 1, "src": "bug:20261120112604-windows-temporarydirectory-cleanup", "type": "caused_by", "weight": 1.0}
+{"created": "2026-11-20T11:26:03.842189+00:00", "dst": "file:project-brain/assets/viewer.html", "note": "", "schema_version": 1, "src": "decision:20261120112603-canvas-over-svg-for", "type": "implements", "weight": 1.0}
+{"created": "2026-11-20T11:26:03.544573+00:00", "dst": "file:project-brain/scripts/brain.py", "note": "", "schema_version": 1, "src": "decision:20261120112603-use-jsonl-appendonly-format", "type": "implements", "weight": 1.0}
+{"created": "2026-11-20T11:26:04.139844+00:00", "dst": "file:project-brain/scripts/brain.py", "note": "", "schema_version": 1, "src": "decision:20261120112604-stdlib-only-zero-dependencies", "type": "implements", "weight": 1.0}
+{"created": "2026-11-21T01:19:10.955745+00:00", "dst": "file:project-brain/scripts/brain.py", "note": "", "schema_version": 1, "src": "decision:20261121011910-harden-brainnet-storage-and", "type": "implements", "weight": 1.0}
+{"created": "2026-11-20T11:37:07.188210+00:00", "dst": "file:project-brain/assets/agent-block.md", "note": "", "schema_version": 1, "src": "file:.github/copilot-instructions.md", "type": "derived_from", "weight": 1.0}
+{"created": "2026-11-20T11:26:05.243478+00:00", "dst": "file:LICENSE", "note": "", "schema_version": 1, "src": "file:.gitignore", "type": "relates_to", "weight": 1.0}
+{"created": "2026-11-20T11:37:06.466052+00:00", "dst": "file:project-brain/assets/agent-block.md", "note": "", "schema_version": 1, "src": "file:AGENTS.md", "type": "derived_from", "weight": 1.0}
+{"created": "2026-11-20T11:37:06.824164+00:00", "dst": "file:project-brain/assets/agent-block.md", "note": "", "schema_version": 1, "src": "file:GEMINI.md", "type": "derived_from", "weight": 1.0}
+{"created": "2026-11-20T11:26:05.550297+00:00", "dst": "file:project-brain/README.md", "note": "", "schema_version": 1, "src": "file:LICENSE", "type": "relates_to", "weight": 1.0}
+{"created": "2026-11-20T11:36:30.064138+00:00", "dst": "file:project-brain/scripts/brain.py", "note": "", "schema_version": 1, "src": "file:README.md", "type": "relates_to", "weight": 1.0}
+{"created": "2026-11-20T11:36:30.358677+00:00", "dst": "file:project-brain/SKILL.md", "note": "", "schema_version": 1, "src": "file:project-brain/README.md", "type": "relates_to", "weight": 1.0}
+{"created": "2026-11-20T11:26:02.485110+00:00", "dst": "file:project-brain/scripts/brain.py", "note": "", "schema_version": 1, "src": "file:project-brain/SKILL.md", "type": "depends_on", "weight": 1.0}
+{"created": "2026-11-20T11:26:03.203050+00:00", "dst": "file:project-brain/SKILL.md", "note": "", "schema_version": 1, "src": "file:project-brain/assets/agent-block.md", "type": "derived_from", "weight": 1.0}
+{"created": "2026-11-20T11:26:02.182106+00:00", "dst": "file:project-brain/scripts/brain.py", "note": "", "schema_version": 1, "src": "file:project-brain/assets/viewer.html", "type": "depends_on", "weight": 1.0}
+{"created": "2026-11-21T01:19:10.303335+00:00", "dst": "decision:20261120112603-use-jsonl-appendonly-format", "note": "", "schema_version": 1, "src": "file:project-brain/scripts/brain.py", "type": "implements", "weight": 1.0}
+{"created": "2026-11-20T11:26:01.577025+00:00", "dst": "file:project-brain/scripts/test_brain.py", "note": "", "schema_version": 1, "src": "file:project-brain/scripts/brain.py", "type": "tests", "weight": 1.0}
+{"created": "2026-11-20T11:26:01.209219+00:00", "dst": "file:project-brain/scripts/brain.py", "note": "", "schema_version": 1, "src": "file:project-brain/scripts/test_brain.py", "type": "imports", "weight": 1.0}
+{"created": "2026-11-21T01:19:10.627077+00:00", "dst": "file:project-brain/scripts/brain.py", "note": "", "schema_version": 1, "src": "file:project-brain/scripts/test_brain.py", "type": "tests", "weight": 1.0}
+{"created": "2026-11-20T11:37:07.523765+00:00", "dst": "file:project-brain/scripts/brain.py", "note": "Expand AST parsing support", "schema_version": 1, "src": "task:20261120112604-add-more-language-parsers", "type": "relates_to", "weight": 1.0}
+{"created": "2026-11-20T11:26:04.430055+00:00", "dst": "file:project-brain/SKILL.md", "note": "", "schema_version": 1, "src": "thought:20261120112604-agent-memory-persistence", "type": "relates_to", "weight": 1.0}

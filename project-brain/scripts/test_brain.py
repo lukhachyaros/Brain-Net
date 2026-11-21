@@ -453,7 +453,7 @@ class TestAtomicWriteAndLock(BaseBrainTestCase):
         fl.acquire()
         self.assertTrue(lock_file.exists())
         fl.release()
-        self.assertFalse(lock_file.exists())
+        self.assertTrue(lock_file.exists())
 
     def test_file_lock_timeout(self) -> None:
         lock_file = self.project_root / ".timeout.lock"
@@ -475,10 +475,10 @@ class TestAtomicWriteAndLock(BaseBrainTestCase):
         os.utime(lock_file, (past_time, past_time))
 
         fl = brain.FileLock(lock_file, timeout=1.0, stale_age=60.0)
-        # Should detect stale lock, override it, and succeed
+        # Old lock metadata must never be unlinked before OS lock acquisition.
         fl.acquire()
         fl.release()
-        self.assertFalse(lock_file.exists())
+        self.assertTrue(lock_file.exists())
 
     def test_concurrent_writes_threads(self) -> None:
         """Simulate two simultaneous threads writing nodes to storage without data loss."""
@@ -606,6 +606,22 @@ class TestInit(BaseBrainTestCase):
         # Ensure .gitignore has only one lock entry
         gi = (self.project_root / ".gitignore").read_text(encoding="utf-8")
         self.assertEqual(gi.count(".brain/*.lock"), 1)
+
+    def test_init_dry_run_makes_no_changes(self) -> None:
+        res = self.run_cli("init", "--dry-run", "--json")
+        self.assertEqual(res.returncode, 0)
+        data = json.loads(res.stdout)
+        self.assertTrue(data["dry_run"])
+        self.assertFalse((self.project_root / ".brain").exists())
+        self.assertFalse((self.project_root / "AGENTS.md").exists())
+
+    def test_init_can_skip_instruction_injection(self) -> None:
+        res = self.run_cli("init", "--no-instruction-injection", "--json")
+        self.assertEqual(res.returncode, 0)
+        data = json.loads(res.stdout)
+        self.assertEqual(data["injected_files"], [])
+        self.assertTrue((self.project_root / ".brain").is_dir())
+        self.assertFalse((self.project_root / "AGENTS.md").exists())
 
     def test_init_preserves_existing_agents_md(self) -> None:
         header_text = "# Custom Organization Rules\n\n- Rule 1: Always write tests\n- Rule 2: Keep it DRY\n"
