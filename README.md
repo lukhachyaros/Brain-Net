@@ -67,35 +67,79 @@ Project Brain simplifies agent operations into a 4-stage feedback loop:
 
 ## 🚀 Quick Start
 
-### 1. Installation
+### 1. Yêu cầu
 
-Copy the `project-brain/` directory into your project root or skill directory:
+- Python **3.10 trở lên**
+- Không cần `pip install`
+- Chạy các lệnh tại thư mục gốc của dự án
 
-```bash
-# Recommended locations by AI tool
-.agents/skills/project-brain/       # Antigravity
-.agent/skills/project-brain/        # Codex
-.github/skills/project-brain/       # GitHub Copilot
-.claude/skills/project-brain/       # Claude Code
+Kiểm tra Python:
+
+```powershell
+python --version
 ```
 
-### 2. Initialize in Your Project
+### 2. Cài đặt skill vào dự án
 
-Run from your project root:
+Tải repository về hoặc sao chép thư mục `project-brain/` vào thư mục gốc của dự án của bạn:
 
-```bash
-# Initialize .brain/ and inject instruction blocks into AGENTS.md, GEMINI.md, copilot-instructions.md
+```text
+my-project/
+├── project-brain/
+│   ├── SKILL.md
+│   ├── scripts/
+│   └── assets/
+└── <mã nguồn dự án>
+```
+
+Các agent có thể tìm skill tự động ở các vị trí sau:
+
+| Agent | Thư mục skill |
+|---|---|
+| Antigravity | `.agents/skills/project-brain/` |
+| Codex | `.agents/skills/project-brain/` hoặc `.agent/skills/project-brain/` |
+| GitHub Copilot | `.github/skills/project-brain/` |
+| Claude Code | `.claude/skills/project-brain/` |
+
+> Với cách dùng đơn giản nhất, giữ `project-brain/` ngay tại thư mục gốc dự án. Không bắt buộc phải copy vào thư mục riêng của từng agent.
+
+Ví dụ sao chép thư mục bằng PowerShell:
+
+```powershell
+Copy-Item -Recurse ".\project-brain" "D:\du-an-cua-toi\project-brain"
+```
+
+### 3. Khởi tạo Project Brain
+
+Từ thư mục gốc của dự án cần theo dõi, chạy:
+
+```powershell
 python project-brain/scripts/brain.py init
-
-# Scan codebase to index files and dependencies
 python project-brain/scripts/brain.py scan
-
-# Generate the initial agent digest summary
 python project-brain/scripts/brain.py digest
+python project-brain/scripts/brain.py doctor
+```
 
-# (Optional) Open the live graph viewer
+Sau bước khởi tạo:
+
+- `.brain/` lưu graph memory của dự án
+- `AGENTS.md`, `GEMINI.md` và `.github/copilot-instructions.md` nhận hướng dẫn vận hành cho agent
+- `INDEX.md` chứa bản tóm tắt được agent đọc ở đầu mỗi phiên làm việc
+- Lock của `.brain/` được tự động loại khỏi Git
+
+Nếu skill được đặt ở thư mục khác, thay đường dẫn tương ứng khi chạy:
+
+```powershell
+python D:\du-an-cua-toi\.agents\skills\project-brain\scripts\brain.py init
+```
+
+### 4. Xem graph trực quan
+
+```powershell
 python project-brain/scripts/brain.py serve --port 8765
 ```
+
+Sau đó mở: **http://127.0.0.1:8765**
 
 ---
 

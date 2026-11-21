@@ -12,11 +12,50 @@ Persistent graph memory for AI coding agents. Keeps a summarized knowledge graph
 
 ## Quick Start
 
-```bash
-# From your project root:
-python path/to/project-brain/scripts/brain.py init
-python path/to/project-brain/scripts/brain.py scan
-python path/to/project-brain/scripts/brain.py digest
+### 1. Kiểm tra môi trường
+
+Project Brain chỉ cần Python 3.10+; không cần cài dependency bằng pip.
+
+```powershell
+python --version
+```
+
+### 2. Đặt skill vào dự án
+
+Có thể giữ nguyên thư mục repository hoặc copy `project-brain/` vào thư mục gốc của dự án cần theo dõi:
+
+```text
+your-project/
+├── project-brain/
+│   ├── SKILL.md
+│   ├── scripts/brain.py
+│   └── assets/agent-block.md
+└── ...
+```
+
+### 3. Khởi tạo
+
+Chạy tất cả lệnh dưới đây từ thư mục gốc của **dự án**, không chạy từ thư mục `project-brain/`:
+
+```powershell
+python project-brain/scripts/brain.py init
+python project-brain/scripts/brain.py scan
+python project-brain/scripts/brain.py digest
+python project-brain/scripts/brain.py doctor
+```
+
+`init` tạo `.brain/` và thêm instruction block vào các file hướng dẫn agent. `scan` xây dựng graph ban đầu. `digest` tạo `.brain/INDEX.md`. `doctor` xác nhận cấu hình đã khỏe.
+
+Xem trước thay đổi mà không ghi file:
+
+```powershell
+python project-brain/scripts/brain.py init --dry-run
+```
+
+Chỉ khởi tạo dữ liệu, không thay instruction file:
+
+```powershell
+python project-brain/scripts/brain.py init --no-instruction-injection
 ```
 
 ## Workflow Pipeline

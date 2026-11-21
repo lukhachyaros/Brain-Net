@@ -3,12 +3,16 @@
 {"created": "2026-11-20T11:26:03.544573+00:00", "dst": "file:project-brain/scripts/brain.py", "note": "", "schema_version": 1, "src": "decision:20261120112603-use-jsonl-appendonly-format", "type": "implements", "weight": 1.0}
 {"created": "2026-11-20T11:26:04.139844+00:00", "dst": "file:project-brain/scripts/brain.py", "note": "", "schema_version": 1, "src": "decision:20261120112604-stdlib-only-zero-dependencies", "type": "implements", "weight": 1.0}
 {"created": "2026-11-21T01:19:10.955745+00:00", "dst": "file:project-brain/scripts/brain.py", "note": "", "schema_version": 1, "src": "decision:20261121011910-harden-brainnet-storage-and", "type": "implements", "weight": 1.0}
+{"created": "2026-11-21T01:38:19.004070+00:00", "dst": "file:README.md", "note": "", "schema_version": 1, "src": "decision:20261121013819-rewrite-readme-installation-guidance", "type": "implements", "weight": 1.0}
+{"created": "2026-11-21T01:38:19.004070+00:00", "dst": "file:project-brain/README.md", "note": "", "schema_version": 1, "src": "decision:20261121013819-rewrite-readme-installation-guidance", "type": "implements", "weight": 1.0}
 {"created": "2026-11-20T11:37:07.188210+00:00", "dst": "file:project-brain/assets/agent-block.md", "note": "", "schema_version": 1, "src": "file:.github/copilot-instructions.md", "type": "derived_from", "weight": 1.0}
 {"created": "2026-11-20T11:26:05.243478+00:00", "dst": "file:LICENSE", "note": "", "schema_version": 1, "src": "file:.gitignore", "type": "relates_to", "weight": 1.0}
 {"created": "2026-11-20T11:37:06.466052+00:00", "dst": "file:project-brain/assets/agent-block.md", "note": "", "schema_version": 1, "src": "file:AGENTS.md", "type": "derived_from", "weight": 1.0}
 {"created": "2026-11-20T11:37:06.824164+00:00", "dst": "file:project-brain/assets/agent-block.md", "note": "", "schema_version": 1, "src": "file:GEMINI.md", "type": "derived_from", "weight": 1.0}
 {"created": "2026-11-20T11:26:05.550297+00:00", "dst": "file:project-brain/README.md", "note": "", "schema_version": 1, "src": "file:LICENSE", "type": "relates_to", "weight": 1.0}
+{"created": "2026-11-21T01:38:18.310245+00:00", "dst": "file:project-brain/README.md", "note": "", "schema_version": 1, "src": "file:README.md", "type": "relates_to", "weight": 1.0}
 {"created": "2026-11-20T11:36:30.064138+00:00", "dst": "file:project-brain/scripts/brain.py", "note": "", "schema_version": 1, "src": "file:README.md", "type": "relates_to", "weight": 1.0}
+{"created": "2026-11-21T01:38:18.619257+00:00", "dst": "file:README.md", "note": "", "schema_version": 1, "src": "file:project-brain/README.md", "type": "relates_to", "weight": 1.0}
 {"created": "2026-11-20T11:36:30.358677+00:00", "dst": "file:project-brain/SKILL.md", "note": "", "schema_version": 1, "src": "file:project-brain/README.md", "type": "relates_to", "weight": 1.0}
 {"created": "2026-11-20T11:26:02.485110+00:00", "dst": "file:project-brain/scripts/brain.py", "note": "", "schema_version": 1, "src": "file:project-brain/SKILL.md", "type": "depends_on", "weight": 1.0}
 {"created": "2026-11-20T11:26:03.203050+00:00", "dst": "file:project-brain/SKILL.md", "note": "", "schema_version": 1, "src": "file:project-brain/assets/agent-block.md", "type": "derived_from", "weight": 1.0}
