@@ -30,6 +30,7 @@ from datetime import timezone
 import fnmatch
 import hashlib
 import http.server
+import io
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -104,8 +105,8 @@ DEFAULT_AGENT_BLOCK = """<!-- BRAIN:START — managed by project-brain, do not e
 
 **All commands:** `python {{BRAIN_PATH}} <command>`
 
-1. **Start of session:** run `sync`, then read only `.brain/INDEX.md` and files listed as stale/new. Do NOT scan or read the whole repo.
-2. **Find things:** run `query "<keywords>" --depth 2` before opening files. Open a file only if its node is stale or the summary is insufficient.
+1. **At the start of every session:** run `sync`, then read `.brain/INDEX.md` once and only files listed as stale/new. This is automatic because Project Brain is initialized for the project; do not ask the user to invoke the skill again.
+2. **Find task context:** run `query "<keywords>" --depth 0 --budget 2000` before opening files. `--depth 0` adapts graph depth; `--budget 2000` caps estimated context.
 3. **After every file create/edit/delete:** run `touch <path> --summary "<1-2 sentences>" --link <node_id>[:edge_type]`.
 4. **After every design decision, bug, or change of direction:** run `note --type decision|bug|thought|task --title "..." --summary "..." --link <node_id>[:edge_type]`. A decision replacing an older one must include `--link <old_decision_id>:supersedes`.
 5. **End of session:** run `lint`, fix reported issues, then `digest`.
@@ -1304,6 +1305,9 @@ class GraphQueryEngine:
     def __init__(self, nodes: Dict[str, Node], edges: List[Edge]) -> None:
         self.nodes = nodes
         self.edges = edges
+        self.last_depth = 0
+        self.last_budget_chars = 0
+        self.last_superseded_filtered = 0
         self.adj: Dict[str, Set[str]] = {nid: set() for nid in nodes}
         for e in edges:
             if e.src in self.adj and e.dst in self.adj:
@@ -1313,9 +1317,10 @@ class GraphQueryEngine:
     def query(
         self,
         keyword_or_id: str,
-        max_depth: int = 2,
+        max_depth: Optional[int] = 2,
         filter_type: Optional[str] = None,
         top_k: int = 20,
+        token_budget: Optional[int] = None,
     ) -> List[Tuple[Node, float, List[Edge]]]:
         """
         Score nodes by exact ID match, token matches on title/summary/tags,
@@ -1327,9 +1332,14 @@ class GraphQueryEngine:
 
         tokens = [t.lower() for t in raw_query.split() if t.strip()]
         base_scores: Dict[str, float] = {}
+        self.last_superseded_filtered = sum(
+            1 for node in self.nodes.values() if node.status == "superseded"
+        )
 
         # 1. Base lexical scoring
         for nid, node in self.nodes.items():
+            if node.status == "superseded":
+                continue
             score = 0.0
             if nid == raw_query or nid.lower() == raw_query.lower():
                 score += 100.0
@@ -1356,6 +1366,22 @@ class GraphQueryEngine:
                 base_scores[nid] = score
 
         # 2. Graph proximity boost
+        if max_depth is None or max_depth < 1:
+            exact_match = any(
+                nid == raw_query or nid.lower() == raw_query.lower()
+                for nid in base_scores
+            )
+            strong_match_count = sum(score >= 10.0 for score in base_scores.values())
+            if exact_match:
+                effective_depth = 1
+            elif strong_match_count <= 3:
+                effective_depth = 2
+            else:
+                effective_depth = 1
+        else:
+            effective_depth = max_depth
+        self.last_depth = effective_depth
+
         total_scores: Dict[str, float] = dict(base_scores)
         for seed_id, seed_score in base_scores.items():
             visited: Set[str] = {seed_id}
@@ -1363,7 +1389,7 @@ class GraphQueryEngine:
 
             while queue:
                 curr_id, depth = queue.pop(0)
-                if depth >= max_depth:
+                if depth >= effective_depth:
                     continue
 
                 next_depth = depth + 1
@@ -1382,13 +1408,26 @@ class GraphQueryEngine:
             node = self.nodes.get(nid)
             if not node:
                 continue
+            if node.status == "superseded":
+                continue
             if filter_type and node.type != filter_type:
                 continue
             scored_nodes.append((node, final_score))
 
         # 4. Sort descending by score
         scored_nodes.sort(key=lambda item: item[1], reverse=True)
-        top_items = scored_nodes[:top_k]
+        top_items: List[Tuple[Node, float]] = []
+        used_chars = 0
+        budget_chars = max(0, int(token_budget * 4)) if token_budget is not None else 0
+        self.last_budget_chars = budget_chars
+        for node, score in scored_nodes:
+            estimated_chars = len(node.id) + len(node.title) + len(node.summary) + 32
+            if len(top_items) >= max(1, top_k):
+                break
+            if budget_chars and used_chars + estimated_chars > budget_chars:
+                break
+            top_items.append((node, score))
+            used_chars += estimated_chars
 
         # 5. Attach connected edges
         results: List[Tuple[Node, float, List[Edge]]] = []
@@ -1858,6 +1897,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     storage = BrainStorage(root)
     dry_run = bool(getattr(args, "dry_run", False))
     no_injection = bool(getattr(args, "no_instruction_injection", False))
+    skip_bootstrap = bool(getattr(args, "skip_bootstrap", False))
     agent = getattr(args, "agent", "all")
 
     if not dry_run:
@@ -1962,8 +2002,27 @@ def cmd_init(args: argparse.Namespace) -> int:
         else:
             gi_updated = True
 
+    bootstrap = {
+        "scan": "skipped",
+        "digest": "skipped",
+    }
+    if not dry_run and not skip_bootstrap:
+        try:
+            scan_args = argparse.Namespace(root=args.root, json=False)
+            with contextlib.redirect_stdout(io.StringIO()):
+                scan_result = cmd_scan(scan_args)
+            bootstrap["scan"] = "ok" if scan_result == 0 else "failed"
+            if scan_result == 0:
+                digest_args = argparse.Namespace(root=args.root, json=False)
+                with contextlib.redirect_stdout(io.StringIO()):
+                    digest_result = cmd_digest(digest_args)
+                bootstrap["digest"] = "ok" if digest_result == 0 else "failed"
+        except Exception as err:
+            raise BrainStorageError(f"Automatic bootstrap failed: {err}") from err
+
     res = {
         "brain_dir": storage.brain_dir.as_posix(),
+        "bootstrap": bootstrap,
         "dry_run": dry_run,
         "gitignore_updated": gi_updated,
         "injected_files": injected_files,
@@ -1978,6 +2037,9 @@ def cmd_init(args: argparse.Namespace) -> int:
         print(f"{prefix} at: {root}")
         print(f"Data directory: {storage.brain_dir}")
         print(f"Injected instructions into: {', '.join(injected_files)}")
+        if not dry_run:
+            print(f"Automatic scan: {bootstrap['scan']}")
+            print(f"Automatic digest: {bootstrap['digest']}")
         if gi_updated:
             print("Added '.brain/*.lock' to .gitignore")
     return 0
@@ -2393,6 +2455,7 @@ def cmd_note(args: argparse.Namespace) -> int:
     )
 
     edges_to_create: List[Edge] = []
+    superseded_nodes: List[str] = []
     for raw_l in links:
         target_id, edge_type = _parse_link_argument(raw_l)
         edges_to_create.append(
@@ -2404,6 +2467,20 @@ def cmd_note(args: argparse.Namespace) -> int:
                 created=now_str,
             )
         )
+        if edge_type == "supersedes":
+            existing_nodes = storage.read_nodes()
+            existing = existing_nodes.get(target_id)
+            if existing is None:
+                raise BrainValidationError(
+                    f"Cannot supersede unknown node `{target_id}`."
+                )
+            superseded_nodes.append(target_id)
+            storage.append_node(dataclasses.replace(
+                existing,
+                status="superseded",
+                updated=now_str,
+                session_id=GLOBAL_SESSION_ID,
+            ))
 
     storage.append_node(node)
     storage.append_edges(edges_to_create)
@@ -2412,6 +2489,7 @@ def cmd_note(args: argparse.Namespace) -> int:
         "created_edges": [e.to_dict() for e in edges_to_create],
         "node": node.to_dict(),
         "status": "ok",
+        "superseded_nodes": superseded_nodes,
     }
 
     if args.json:
@@ -2420,6 +2498,8 @@ def cmd_note(args: argparse.Namespace) -> int:
         print(f"Created node `{node.id}`: {node.title}")
         for e in edges_to_create:
             print(f"  -> linked to `{e.dst}` via '{e.type}'")
+        for superseded_id in superseded_nodes:
+            print(f"  Superseded node: `{superseded_id}`")
 
     return 0
 
@@ -2662,9 +2742,10 @@ def cmd_query(args: argparse.Namespace) -> int:
     engine = GraphQueryEngine(nodes, edges)
     results = engine.query(
         keyword_or_id=args.query,
-        max_depth=int(args.depth or 2),
+        max_depth=None if int(args.depth or 0) == 0 else int(args.depth),
         filter_type=args.type,
         top_k=20,
+        token_budget=int(args.budget) if int(args.budget or 0) > 0 else None,
     )
 
     if args.json:
@@ -2675,13 +2756,25 @@ def cmd_query(args: argparse.Namespace) -> int:
                 "node": node.to_dict(),
                 "score": round(score, 2),
             })
-        print(json.dumps({"query": args.query, "results": structured}, indent=2))
+        print(json.dumps({
+            "query": args.query,
+            "retrieval": {
+                "depth": engine.last_depth,
+                "token_budget": int(args.budget or 0) or None,
+                "superseded_filtered": engine.last_superseded_filtered,
+            },
+            "results": structured,
+        }, indent=2))
     else:
         if not results:
             print(f"No nodes found matching query '{args.query}'.")
             return 0
 
-        print(f"Query: '{args.query}' (found {len(results)} relevant nodes)")
+        budget_label = f", budget={args.budget} tokens" if int(args.budget or 0) > 0 else ""
+        print(
+            f"Query: '{args.query}' (found {len(results)} relevant nodes, "
+            f"depth={engine.last_depth}{budget_label})"
+        )
         print("=" * 60)
         for node, score, connected in results:
             print(f"\n[{score:5.1f}] `{node.id}` ({node.type}, status={node.status})")
@@ -2954,6 +3047,7 @@ def build_cli_parser() -> argparse.ArgumentParser:
     p_init = subparsers.add_parser("init", help="Initialize .brain/ and inject instructions into agent docs")
     p_init.add_argument("--dry-run", action="store_true", help="Preview initialization without writing files")
     p_init.add_argument("--no-instruction-injection", action="store_true", help="Initialize data without modifying agent instruction files")
+    p_init.add_argument("--skip-bootstrap", action="store_true", help="Initialize only; do not automatically scan and generate INDEX.md")
     p_init.add_argument("--agent", choices=["all", "codex", "gemini", "copilot"], default="all", help="Limit instruction injection to one agent")
 
     # doctor
@@ -2998,7 +3092,8 @@ def build_cli_parser() -> argparse.ArgumentParser:
     # query
     p_query = subparsers.add_parser("query", help="Search graph nodes by keyword or ID with graph proximity boost")
     p_query.add_argument("query", type=str, help="Search keywords or exact node ID")
-    p_query.add_argument("--depth", type=int, default=2, help="Maximum graph exploration depth for proximity boost")
+    p_query.add_argument("--depth", type=int, default=0, help="Maximum graph depth; 0 adapts depth to match quality")
+    p_query.add_argument("--budget", type=int, default=0, help="Maximum estimated retrieval budget in tokens; 0 means unlimited")
     p_query.add_argument("--type", type=str, default=None, choices=sorted(VALID_NODE_TYPES), help="Filter by node type")
 
     # digest

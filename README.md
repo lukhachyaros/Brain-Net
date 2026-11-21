@@ -10,7 +10,7 @@
   <a href="#why-project-brain"><img src="https://img.shields.io/badge/Architecture-Graph%20Memory-7928CA?style=for-the-badge&logo=graphql" alt="Graph Memory"></a>
   <a href="#requirements"><img src="https://img.shields.io/badge/Python-3.10%2B%20Stdlib-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.10+"></a>
   <a href="#dependencies"><img src="https://img.shields.io/badge/Dependencies-Zero%20(No%20Pip)-success?style=for-the-badge" alt="Zero Dependencies"></a>
-  <a href="#tests"><img src="https://img.shields.io/badge/Tests-69%2F69%20Passed-brightgreen?style=for-the-badge" alt="Tests"></a>
+  <a href="#tests"><img src="https://img.shields.io/badge/Tests-76%2F76%20Passed-brightgreen?style=for-the-badge" alt="Tests"></a>
   <a href="#platforms"><img src="https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-blue?style=for-the-badge" alt="Cross-Platform"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge" alt="License: MIT"></a>
 </p>
@@ -81,14 +81,17 @@ python --version
 
 ### 2. Cài đặt skill vào dự án
 
-Tải repository về hoặc sao chép thư mục `project-brain/` vào thư mục gốc của dự án của bạn:
+Chỉ copy các file runtime. Không copy README package, ảnh trong `docs/`, hoặc test suite:
 
 ```text
 my-project/
 ├── project-brain/
 │   ├── SKILL.md
 │   ├── scripts/
+│   │   └── brain.py
 │   └── assets/
+│       ├── agent-block.md
+│       └── viewer.html
 └── <mã nguồn dự án>
 ```
 
@@ -115,12 +118,14 @@ Từ thư mục gốc của dự án cần theo dõi, chạy:
 
 ```powershell
 python project-brain/scripts/brain.py init
-python project-brain/scripts/brain.py scan
-python project-brain/scripts/brain.py digest
 python project-brain/scripts/brain.py doctor
 ```
 
 Sau bước khởi tạo:
+
+- `init` tự động scan project, tạo graph và generate `INDEX.md`
+- Sau lần chạy đầu tiên, các agent instruction trong dự án tiếp tục tự áp dụng ở các session sau
+- Không cần gọi lại skill cho mỗi lượt chat
 
 - `.brain/` lưu graph memory của dự án
 - `AGENTS.md`, `GEMINI.md` và `.github/copilot-instructions.md` nhận hướng dẫn vận hành cho agent
@@ -201,18 +206,18 @@ All project state lives inside `.brain/` at the project root:
 
 ## 🧪 Testing & Validation
 
-The test suite in `project-brain/scripts/test_brain.py` executes **69 tests across 12 categories** without external test runners:
+The test suite in `tests/test_brain.py` executes **76 tests across 12 categories** without external test runners:
 
 ```bash
 # Run using Python stdlib unittest:
-python -m unittest project-brain/scripts/test_brain.py
+python tests/test_brain.py
 
 # Or with pytest:
-pytest project-brain/scripts/test_brain.py -v
+pytest tests/test_brain.py -v
 ```
 
 ```text
-============================= 69 passed in 34.72s =============================
+============================= 76 passed in 40.00s =============================
 ```
 
 - ✅ **Parsers**: Python AST, JS/TS ESM & CommonJS, HTML tags, PHP includes.

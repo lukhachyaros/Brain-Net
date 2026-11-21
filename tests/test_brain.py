@@ -41,7 +41,7 @@ from typing import Any, Dict, List, Optional
 import unittest
 
 # Resolve path to brain.py
-BRAIN_PY = Path(__file__).resolve().parent / "brain.py"
+BRAIN_PY = Path(__file__).resolve().parent.parent / "project-brain" / "scripts" / "brain.py"
 sys.path.insert(0, str(BRAIN_PY.parent))
 import brain
 
@@ -50,7 +50,7 @@ PYTHON_EXE = sys.executable or "python"
 
 # Base temporary directory on the same filesystem mount as brain.py.
 # This prevents cross-drive mount issues on Windows (e.g. workspace on D: and system temp on C:).
-TEST_TMP_BASE = BRAIN_PY.parent.parent / ".test_tmp"
+TEST_TMP_BASE = BRAIN_PY.parent.parent.parent / ".test_tmp"
 TEST_TMP_BASE.mkdir(parents=True, exist_ok=True)
 
 
@@ -592,10 +592,21 @@ class TestInit(BaseBrainTestCase):
     def test_init_creates_structure(self) -> None:
         res = self.run_cli("init", "--json")
         self.assertEqual(res.returncode, 0)
+        data = json.loads(res.stdout)
+        self.assertEqual(data["bootstrap"]["scan"], "ok")
+        self.assertEqual(data["bootstrap"]["digest"], "ok")
         self.assertTrue((self.project_root / ".brain").is_dir())
         self.assertTrue((self.project_root / ".brain" / "config.json").is_file())
         self.assertTrue((self.project_root / ".brain" / "nodes.jsonl").is_file())
         self.assertTrue((self.project_root / ".brain" / "edges.jsonl").is_file())
+        self.assertTrue((self.project_root / ".brain" / "INDEX.md").is_file())
+
+    def test_init_can_skip_automatic_bootstrap(self) -> None:
+        res = self.run_cli("init", "--skip-bootstrap", "--json")
+        self.assertEqual(res.returncode, 0)
+        data = json.loads(res.stdout)
+        self.assertEqual(data["bootstrap"]["scan"], "skipped")
+        self.assertEqual(data["bootstrap"]["digest"], "skipped")
 
     def test_init_is_idempotent(self) -> None:
         res1 = self.run_cli("init")
@@ -662,6 +673,48 @@ class TestInit(BaseBrainTestCase):
 
 class TestQuery(BaseBrainTestCase):
     """Tests for graph search scoring, exact matches, proximity, and filtering."""
+
+    def test_superseded_nodes_are_excluded(self) -> None:
+        active = brain.Node(id="decision:new", type="decision", title="New Strategy", summary="Use the new approach")
+        old = brain.Node(id="decision:old", type="decision", title="Old Strategy", summary="Use the old approach", status="superseded")
+        edge = brain.Edge(src="decision:new", dst="decision:old", type="supersedes")
+        engine = brain.GraphQueryEngine(
+            {"decision:new": active, "decision:old": old},
+            [edge],
+        )
+
+        results = engine.query("Strategy")
+        self.assertEqual([r[0].id for r in results], ["decision:new"])
+        self.assertGreater(engine.last_superseded_filtered, 0)
+
+    def test_adaptive_depth_for_exact_id(self) -> None:
+        n1 = brain.Node(id="n1", type="concept", title="Exact", summary="Target")
+        n2 = brain.Node(id="n2", type="concept", title="Neighbor", summary="One hop")
+        n3 = brain.Node(id="n3", type="concept", title="Deep", summary="Two hops")
+        edge1 = brain.Edge(src="n1", dst="n2", type="relates_to")
+        edge2 = brain.Edge(src="n2", dst="n3", type="relates_to")
+        engine = brain.GraphQueryEngine({"n1": n1, "n2": n2, "n3": n3}, [edge1, edge2])
+
+        results = engine.query("n1", max_depth=None)
+        ids = [r[0].id for r in results]
+        self.assertIn("n2", ids)
+        self.assertNotIn("n3", ids)
+        self.assertEqual(engine.last_depth, 1)
+
+    def test_token_budget_limits_retrieval(self) -> None:
+        nodes = {
+            f"n{i}": brain.Node(
+                id=f"n{i}",
+                type="concept",
+                title=f"Keyword Target {i}",
+                summary="x" * 280,
+            )
+            for i in range(10)
+        }
+        engine = brain.GraphQueryEngine(nodes, [])
+
+        results = engine.query("Keyword", max_depth=1, top_k=20, token_budget=100)
+        self.assertLess(len(results), len(nodes))
 
     def test_exact_id_match_scores_highest(self) -> None:
         n1 = brain.Node(id="file:database.py", type="file", title="Database Helper", summary="DB connection pool")
@@ -870,7 +923,7 @@ class TestIntegration30Files(BaseBrainTestCase):
         self.assertEqual(len(all_created_files), 30)
 
         # 1. brain init
-        res_init = self.run_cli("init", "--json")
+        res_init = self.run_cli("init", "--skip-bootstrap", "--json")
         self.assertEqual(res_init.returncode, 0)
         self.assertTrue((self.project_root / ".brain").exists())
 
@@ -974,6 +1027,33 @@ class TestIntegration30Files(BaseBrainTestCase):
 
 class TestNoteTouchLink(BaseBrainTestCase):
     """Tests for note creation validation, touch updates, link and unlink."""
+
+    def test_supersede_marks_old_decision(self) -> None:
+        self.run_cli("init")
+        old_res = self.run_cli(
+            "note",
+            "--type", "decision",
+            "--title", "Old Database",
+            "--summary", "Use SQLite.",
+            "--link", "concept:database:relates_to",
+            "--json",
+        )
+        old_id = json.loads(old_res.stdout)["node"]["id"]
+
+        new_res = self.run_cli(
+            "note",
+            "--type", "decision",
+            "--title", "New Database",
+            "--summary", "Use PostgreSQL.",
+            "--link", f"{old_id}:supersedes",
+            "--json",
+        )
+        self.assertEqual(new_res.returncode, 0)
+        data = json.loads(new_res.stdout)
+        self.assertIn(old_id, data["superseded_nodes"])
+
+        nodes = self.storage.read_nodes()
+        self.assertEqual(nodes[old_id].status, "superseded")
 
     def test_note_creates_node_and_edges(self) -> None:
         self.run_cli("init")
@@ -1107,7 +1187,7 @@ class TestDoctor(BaseBrainTestCase):
     """Tests for doctor environment and repository health checks."""
 
     def test_doctor_healthy_project(self) -> None:
-        self.run_cli("init")
+        self.run_cli("init", "--skip-bootstrap")
         res = self.run_cli("doctor", "--json")
         self.assertEqual(res.returncode, 0)
         data = json.loads(res.stdout)
@@ -1170,7 +1250,7 @@ class TestCompact(BaseBrainTestCase):
     """Tests for JSONL compaction, record deduplication, and deleted purging."""
 
     def test_compact_keeps_latest_node_version(self) -> None:
-        self.run_cli("init")
+        self.run_cli("init", "--skip-bootstrap")
         v1 = brain.Node(id="file:config.py", type="file", title="config.py v1", summary="Initial")
         v2 = brain.Node(id="file:config.py", type="file", title="config.py v2", summary="Intermediate")
         v3 = brain.Node(id="file:config.py", type="file", title="config.py v3", summary="Latest version")
@@ -1227,7 +1307,7 @@ class TestCompact(BaseBrainTestCase):
         self.assertEqual(len(edge_lines), 0)
 
     def test_compact_preserves_data_integrity(self) -> None:
-        self.run_cli("init")
+        self.run_cli("init", "--skip-bootstrap")
         n1 = brain.Node(id="node:1", type="concept", title="First", summary="Sum 1")
         n2 = brain.Node(id="node:2", type="concept", title="Second", summary="Sum 2")
         edge = brain.Edge(src="node:1", dst="node:2", type="relates_to")
@@ -1300,7 +1380,7 @@ class TestLint(BaseBrainTestCase):
         self.assertIn("empty_summary", issue_types)
 
     def test_lint_clean_graph(self) -> None:
-        self.run_cli("init")
+        self.run_cli("init", "--skip-bootstrap")
         n1 = brain.Node(id="concept:one", type="concept", title="Node One", summary="First concept summary")
         n2 = brain.Node(id="concept:two", type="concept", title="Node Two", summary="Second concept summary")
         edge = brain.Edge(src="concept:one", dst="concept:two", type="implements")
